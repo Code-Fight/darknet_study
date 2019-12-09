@@ -102,7 +102,7 @@ typedef struct tree {
 
 // activations.h
 typedef enum {
-    LOGISTIC, RELU, RELIE, LINEAR, RAMP, TANH, PLSE, LEAKY, ELU, LOGGY, STAIR, HARDTAN, LHTAN, SELU, SWISH, MISH, NORM_CHAN
+    LOGISTIC, RELU, RELIE, LINEAR, RAMP, TANH, PLSE, LEAKY, ELU, LOGGY, STAIR, HARDTAN, LHTAN, SELU, SWISH, MISH, NORM_CHAN, NORM_CHAN_SOFTMAX
 }ACTIVATION;
 
 // parser.h
@@ -257,6 +257,7 @@ struct layer {
     float learning_rate_scale;
     float clip;
     int focal_loss;
+    float label_smooth_eps;
     int noloss;
     int softmax;
     int classes;
@@ -637,6 +638,7 @@ typedef struct network {
     int flip; // horizontal flip 50% probability augmentaiont for classifier training (default = 1)
     int blur;
     int mixup;
+    float label_smooth_eps;
     int letter_box;
     float angle;
     float aspect;
@@ -812,6 +814,7 @@ typedef struct load_args {
     int flip;
     int blur;
     int mixup;
+    float label_smooth_eps;
     float angle;
     float aspect;
     float saturation;

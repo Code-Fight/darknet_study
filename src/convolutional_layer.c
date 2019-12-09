@@ -609,7 +609,9 @@ convolutional_layer make_convolutional_layer(int batch, int steps, int h, int w,
 
             if (train) {
                 l.x_gpu = cuda_make_array(l.output, total_batch*out_h*out_w*n);
-                //l.x_norm_gpu = cuda_make_array(l.output, total_batch*out_h*out_w*n);
+#ifndef CUDNN
+                l.x_norm_gpu = cuda_make_array(l.output, total_batch*out_h*out_w*n);
+#endif  // CUDNN
             }
         }
 
@@ -778,10 +780,12 @@ void resize_convolutional_layer(convolutional_layer *l, int w, int h)
 
         if (l->batch_normalize) {
             cuda_free(l->x_gpu);
-            cuda_free(l->x_norm_gpu);
-
             l->x_gpu = cuda_make_array(l->output, total_batch*l->outputs);
+
+#ifndef CUDNN
+            cuda_free(l->x_norm_gpu);
             l->x_norm_gpu = cuda_make_array(l->output, total_batch*l->outputs);
+#endif  // CUDNN
         }
 
         if (l->xnor) {
@@ -1200,6 +1204,7 @@ void forward_convolutional_layer(convolutional_layer l, network_state state)
                 if (l.activation == SWISH) activate_array_swish(l.output, l.outputs*l.batch, l.activation_input, l.output);
                 else if (l.activation == MISH) activate_array_mish(l.output, l.outputs*l.batch, l.activation_input, l.output);
                 else if (l.activation == NORM_CHAN) activate_array_normalize_channels(l.output, l.outputs*l.batch, l.batch, l.out_c, l.out_w*l.out_h, l.output);
+                else if (l.activation == NORM_CHAN_SOFTMAX) activate_array_normalize_channels_softmax(l.output, l.outputs*l.batch, l.batch, l.out_c, l.out_w*l.out_h, l.output);
                 else activate_array_cpu_custom(l.output, m*n*l.batch, l.activation);
                 return;
 
@@ -1241,6 +1246,7 @@ void forward_convolutional_layer(convolutional_layer l, network_state state)
     if (l.activation == SWISH) activate_array_swish(l.output, l.outputs*l.batch, l.activation_input, l.output);
     else if (l.activation == MISH) activate_array_mish(l.output, l.outputs*l.batch, l.activation_input, l.output);
     else if (l.activation == NORM_CHAN) activate_array_normalize_channels(l.output, l.outputs*l.batch, l.batch, l.out_c, l.out_w*l.out_h, l.output);
+    else if (l.activation == NORM_CHAN_SOFTMAX) activate_array_normalize_channels_softmax(l.output, l.outputs*l.batch, l.batch, l.out_c, l.out_w*l.out_h, l.output);
     else activate_array_cpu_custom(l.output, l.outputs*l.batch, l.activation);
 
     if(l.binary || l.xnor) swap_binary(&l);
@@ -1379,6 +1385,7 @@ void backward_convolutional_layer(convolutional_layer l, network_state state)
 
     if (l.activation == SWISH) gradient_array_swish(l.output, l.outputs*l.batch, l.activation_input, l.delta);
     else if (l.activation == MISH) gradient_array_mish(l.outputs*l.batch, l.activation_input, l.delta);
+    else if (l.activation == NORM_CHAN_SOFTMAX) gradient_array_normalize_channels_softmax(l.output, l.outputs*l.batch, l.batch, l.out_c, l.out_w*l.out_h, l.delta);
     else gradient_array(l.output, l.outputs*l.batch, l.activation, l.delta);
 
     if (l.batch_normalize) {
