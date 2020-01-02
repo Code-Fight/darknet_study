@@ -73,6 +73,7 @@ void matrix_add_matrix(matrix from, matrix to)
     }
 }
 
+//¥¥Ω®æÿ’Û
 matrix make_matrix(int rows, int cols)
 {
     int i;

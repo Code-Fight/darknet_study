@@ -12,11 +12,15 @@
 
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
+/*
+获取一个文件里面所有的内容 并返回一个链表
+*/
 list *get_paths(char *filename)
 {
     char *path;
     FILE *file = fopen(filename, "r");
     if(!file) file_error(filename);
+    //创建一个链表
     list *lines = make_list();
     while((path=fgetl(file))){
         list_insert(lines, path);
@@ -42,6 +46,10 @@ char **get_random_paths_indexes(char **paths, int n, int m, int *indexes)
 }
 */
 
+/*
+    从所有的训练样本中，顺序取出n个来，
+    但是起始位置是随机的，每个mini_batch的起点是随机的，每次取n/mini_batch个
+*/
 char **get_sequential_paths(char **paths, int n, int m, int mini_batch, int augment_speed)
 {
     int speed = rand_int(1, augment_speed);
@@ -74,6 +82,7 @@ char **get_sequential_paths(char **paths, int n, int m, int mini_batch, int augm
     return sequentia_paths;
 }
 
+//从所有的训练样本中，随机取n个出来
 char **get_random_paths(char **paths, int n, int m)
 {
     char** random_paths = (char**)calloc(n, sizeof(char*));
@@ -177,6 +186,9 @@ matrix load_image_augment_paths(char **paths, int n, int use_flip, int min, int 
 
 extern int check_mistakes;
 
+/*
+    读取标注框
+*/
 box_label *read_boxes(char *filename, int *n)
 {
     box_label* boxes = (box_label*)calloc(1, sizeof(box_label));
@@ -197,6 +209,9 @@ box_label *read_boxes(char *filename, int *n)
     float x, y, h, w;
     int id;
     int count = 0;
+    //fscanf 按照格式从流中读取数据 并格式化到后面的变量中，返回结果是读取成功的个数
+    //读取完成之后，根据标注文件，换算标注框到每个边的边距
+    //因为 标注文件记录是,id,center x,center y,label w,label h
     while(fscanf(file, "%d %f %f %f %f", &id, &x, &y, &w, &h) == 5){
         boxes = (box_label*)realloc(boxes, (count + 1) * sizeof(box_label));
         boxes[count].id = id;
@@ -215,6 +230,9 @@ box_label *read_boxes(char *filename, int *n)
     return boxes;
 }
 
+/*
+    随机打乱读取出来的标注框
+*/
 void randomize_boxes(box_label *b, int n)
 {
     int i;
@@ -225,7 +243,9 @@ void randomize_boxes(box_label *b, int n)
         b[index] = swap;
     }
 }
-
+/*
+ * 根据之前的增强参数，修改标注文件
+ */
 void correct_boxes(box_label *boxes, int n, float dx, float dy, float sx, float sy, int flip)
 {
     int i;
@@ -246,6 +266,7 @@ void correct_boxes(box_label *boxes, int n, float dx, float dy, float sx, float 
             boxes[i].h = 999999;
             continue;
         }
+        //根据之前的增强参数，修改标注文件
         boxes[i].left   = boxes[i].left  * sx - dx;
         boxes[i].right  = boxes[i].right * sx - dx;
         boxes[i].top    = boxes[i].top   * sy - dy;
@@ -256,17 +277,19 @@ void correct_boxes(box_label *boxes, int n, float dx, float dy, float sx, float 
             boxes[i].left = 1. - boxes[i].right;
             boxes[i].right = 1. - swap;
         }
-
+        //constrain 约束方法 ，防止变换后的值，跑到实际的图像外面
         boxes[i].left =  constrain(0, 1, boxes[i].left);
         boxes[i].right = constrain(0, 1, boxes[i].right);
         boxes[i].top =   constrain(0, 1, boxes[i].top);
         boxes[i].bottom =   constrain(0, 1, boxes[i].bottom);
 
+        // 根据约束后的边距，计算出标注的中心点、宽度高度等信息，对应标注label文件
         boxes[i].x = (boxes[i].left+boxes[i].right)/2;
         boxes[i].y = (boxes[i].top+boxes[i].bottom)/2;
         boxes[i].w = (boxes[i].right - boxes[i].left);
         boxes[i].h = (boxes[i].bottom - boxes[i].top);
 
+        //最后再约束一遍高度和宽度 防止溢出
         boxes[i].w = constrain(0, 1, boxes[i].w);
         boxes[i].h = constrain(0, 1, boxes[i].h);
     }
@@ -361,7 +384,12 @@ int fill_truth_detection(const char *path, int num_boxes, float *truth, int clas
     int min_w_h = 0;
     float lowest_w = 1.F / net_w;
     float lowest_h = 1.F / net_h;
+
+    //随机打乱读到的所有标注信息的顺序，
+    //TODO:意义是什么呢
     randomize_boxes(boxes, count);
+
+    //修改打乱之后的标注文件信息
     correct_boxes(boxes, count, dx, dy, sx, sy, flip);
     if (count > num_boxes) count = num_boxes;
     float x, y, w, h;
@@ -387,6 +415,9 @@ int fill_truth_detection(const char *path, int num_boxes, float *truth, int clas
             ++sub;
             continue;
         }
+        
+        //下面是一堆校验
+        //TODO:lowest_w,lowest_h 这俩是干嘛的？
         if ((w < lowest_w || h < lowest_h)) {
             //sprintf(buff, "echo %s \"Very small object: w < lowest_w OR h < lowest_h\" >> bad_label.list", labelpath);
             //system(buff);
@@ -426,12 +457,15 @@ int fill_truth_detection(const char *path, int num_boxes, float *truth, int clas
         if (x == 0) x += lowest_w;
         if (y == 0) y += lowest_h;
 
+        //y值的存储，一次存储5个 分别是如下所示
         truth[(i-sub)*5+0] = x;
         truth[(i-sub)*5+1] = y;
         truth[(i-sub)*5+2] = w;
         truth[(i-sub)*5+3] = h;
         truth[(i-sub)*5+4] = id;
 
+        //min_w_h 取到所有boxes中最小的标注框
+        //然后 后面会根据这个值来判断是否进行blur
         if (min_w_h == 0) min_w_h = w*net_w;
         if (min_w_h > w*net_w) min_w_h = w*net_w;
         if (min_w_h > h*net_h) min_w_h = h*net_h;
@@ -938,6 +972,7 @@ void blend_truth_mosaic(float *new_truth, int boxes, float *old_truth, int w, in
 
 #include "http_stream.h"
 
+//加载目标检测的数据
 data load_data_detection(int n, char **paths, int m, int w, int h, int c, int boxes, int classes, int use_flip, int use_blur, int use_mixup,
     float jitter, float hue, float saturation, float exposure, int mini_batch, int track, int augment_speed, int letter_box, int show_imgs)
 {
@@ -970,12 +1005,14 @@ data load_data_detection(int n, char **paths, int m, int w, int h, int c, int bo
     float dhue = 0, dsat = 0, dexp = 0, flip = 0, blur = 0;
     int augmentation_calculated = 0;
 
+    //创建输出矩阵 n是输入的图片数量，5个训练参数*boxes数量
     d.y = make_matrix(n, 5*boxes);
     int i_mixup = 0;
     for (i_mixup = 0; i_mixup <= use_mixup; i_mixup++) {
         if (i_mixup) augmentation_calculated = 0;   // recalculate augmentation for the 2nd sequence if(track==1)
 
         char **random_paths;
+        //顺序加载和 随机打乱加载
         if (track) random_paths = get_sequential_paths(paths, n, m, mini_batch, augment_speed);
         else random_paths = get_random_paths(paths, n, m);
 
@@ -985,20 +1022,25 @@ data load_data_detection(int n, char **paths, int m, int w, int h, int c, int bo
 
             int flag = (c >= 3);
             mat_cv *src;
+            //加载图片到mat_cv ，mat_cv 是自己定义的一个void *
             src = load_image_mat_cv(filename, flag);
             if (src == NULL) {
                 if (check_mistakes) getchar();
                 continue;
             }
-
+            //方法里面就是把mat_cv to Mat, then,get the height,weight.
             int oh = get_height_mat(src);
             int ow = get_width_mat(src);
 
+            //ow是原始图像宽度 oh是原始高度
+            //jitter是一个图像增强的参数，主要是控制修改图像宽高
+            //下面这里是使用jitter来同比缩放一下宽度和高度
             int dw = (ow*jitter);
             int dh = (oh*jitter);
 
             if (!augmentation_calculated || !track)
             {
+                //这里随机生成缩放是四边的随机参数
                 augmentation_calculated = 1;
                 r1 = random_float();
                 r2 = random_float();
@@ -1010,9 +1052,11 @@ data load_data_detection(int n, char **paths, int m, int w, int h, int c, int bo
                 dhue = rand_uniform_strong(-hue, hue);
                 dsat = rand_scale(saturation);
                 dexp = rand_scale(exposure);
-
+                //反转参数
+                //TODO:怎么利用？
                 flip = use_flip ? random_gen() % 2 : 0;
 
+                //模糊增强
                 if (use_blur) {
                     int tmp_blur = rand_int(0, 2);  // 0 - disable, 1 - blur background, 2 - blur the whole image
                     if (tmp_blur == 0) blur = 0;
@@ -1020,7 +1064,7 @@ data load_data_detection(int n, char **paths, int m, int w, int h, int c, int bo
                     else blur = use_blur;
                 }
             }
-
+            //根据前面的dw和dh，再根据随机参数，
             int pleft = rand_precalc_random(-dw, dw, r1);
             int pright = rand_precalc_random(-dw, dw, r2);
             int ptop = rand_precalc_random(-dh, dh, r3);
@@ -1052,6 +1096,26 @@ data load_data_detection(int n, char **paths, int m, int w, int h, int c, int bo
                     //printf(" result_ar = %f, ow_tmp = %f, delta_w = %d, pleft = %f, pright = %f \n", result_ar, ow_tmp, delta_w, pleft, pright);
                 }
             }
+            /*
+            ow,oh:原始图像
+            sw,swh:变换后的图像
+            pleft,pright,ptop,pbot 各边变换的参数，相当于把一个图像拉抻了，并不是等比的缩放，所以才有4边
+            sx:宽度的等比缩放系数
+            sy:高度的等比缩放系数
+            dx:pleft在等比ow的缩放系数后与sx的比例系数
+            dy:ptop在等于oh的缩放系数后与sy的比例系数
+            dx，dy：都是用系数的原因是，在标注的label的文件中，保存的本身就是系数，
+                    并且这两个参数的含义是：既然原图变化了，那么相对于原图的标注也肯定要变化，
+                    怎么变化呢，肯定要根据一定的规则来，这个规则就是这两个参数，代表的主要意思就是，
+                    left是x相对于变换后图像的一个值，把这个值转为一个比例，就是标注文件需要修正的比例（系数）
+
+            等图片变换完了之后，修正图片的标注，就可以直接在系数上进行转换，如下：
+            boxes[i].left   = boxes[i].left  * sx - dx;
+            boxes[i].right  = boxes[i].right * sx - dx;
+            boxes[i].top    = boxes[i].top   * sy - dy;
+            boxes[i].bottom = boxes[i].bottom* sy - dy;
+            
+            */
 
             int swidth = ow - pleft - pright;
             int sheight = oh - ptop - pbot;
@@ -1062,15 +1126,25 @@ data load_data_detection(int n, char **paths, int m, int w, int h, int c, int bo
             float dx = ((float)pleft / ow) / sx;
             float dy = ((float)ptop / oh) / sy;
 
-
+            //根据增强参数处理truth，也就是标注的boxes
             int min_w_h = fill_truth_detection(filename, boxes, truth, classes, flip, dx, dy, 1. / sx, 1. / sy, w, h);
 
-            if ((min_w_h / 8) < blur && blur > 1) blur = min_w_h / 8;   // disable blur if one of the objects is too small
+            // 根据最小的标注框 使用blur参数
+			// disable blur if one of the objects is too small
+            if ((min_w_h / 8) < blur && blur > 1) blur = min_w_h / 8;   
 
+            //将突破按照之前的增强参数进行处理
             image ai = image_data_augmentation(src, w, h, pleft, ptop, swidth, sheight, flip, dhue, dsat, dexp,
                 blur, boxes, truth);
 
+            //判断是不是使用mixup 
+            //mixup 参数 就是将两张训练样本互相融合，形成新的图片，需要融合boxes和原图，形成新的图片
+            //参考：https://github.com/AlexeyAB/darknet/issues/3272
+            //参考：https://arxiv.org/pdf/1902.04103v3.pdf
+            //TODO:这里需要去仔细学习一下使用use_mixup的情况
+
             if (use_mixup == 0) {
+                //直接将truth（y）赋值到d.y.vals
                 d.X.vals[i] = ai.data;
                 memcpy(d.y.vals[i], truth, 5 * boxes * sizeof(float));
             }
@@ -1234,6 +1308,7 @@ data load_data_detection(int n, char **paths, int m, int w, int h, int c, int bo
             int dw = (ow*jitter);
             int dh = (oh*jitter);
 
+            // 增强参数计算
             if (!augmentation_calculated || !track)
             {
                 augmentation_calculated = 1;
@@ -1247,7 +1322,8 @@ data load_data_detection(int n, char **paths, int m, int w, int h, int c, int bo
                 dhue = rand_uniform_strong(-hue, hue);
                 dsat = rand_scale(saturation);
                 dexp = rand_scale(exposure);
-
+                //反转参数
+                //TODO:如何反转？怎么利用
                 flip = use_flip ? random_gen() % 2 : 0;
             }
 
@@ -1408,6 +1484,8 @@ void *load_threads(void *ptr)
     int total = args.n;
     free(ptr);
     data* buffers = (data*)calloc(args.threads, sizeof(data));
+    //args.threads 是前面定义的启动几个线程
+    //这个就是创建一个线程数组
     pthread_t* threads = (pthread_t*)calloc(args.threads, sizeof(pthread_t));
     for(i = 0; i < args.threads; ++i){
         args.d = buffers + i;
@@ -1428,6 +1506,7 @@ void *load_threads(void *ptr)
     return 0;
 }
 
+//线程加载数据
 pthread_t load_data(load_args args)
 {
     pthread_t thread;

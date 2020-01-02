@@ -380,7 +380,7 @@ convolutional_layer make_convolutional_layer(int batch, int steps, int h, int w,
 
     if (xnor) groups = 1;   // disable groups for XNOR-net
     if (groups < 1) groups = 1;
-
+    //TODO: blur_stride_x 是什么
     const int blur_stride_x = stride_x;
     const int blur_stride_y = stride_y;
     l.antialiasing = antialiasing;
@@ -409,6 +409,7 @@ convolutional_layer make_convolutional_layer(int batch, int steps, int h, int w,
     l.pad = padding;
     l.batch_normalize = batch_normalize;
     l.learning_rate_scale = 1;
+    //该层卷积核（ kernel） 的权重数量
     l.nweights = (c / groups) * n * size * size;
 
     if (l.share_layer) {
@@ -424,7 +425,9 @@ convolutional_layer make_convolutional_layer(int batch, int steps, int h, int w,
         l.bias_updates = l.share_layer->bias_updates;
     }
     else {
+        //该层卷积所有的权重
         l.weights = (float*)calloc(l.nweights, sizeof(float));
+        //该层卷积所有的biases
         l.biases = (float*)calloc(n, sizeof(float));
 
         if (train) {
@@ -433,9 +436,12 @@ convolutional_layer make_convolutional_layer(int batch, int steps, int h, int w,
         }
     }
 
+    //TODO:这里的scale不知道是干嘛的
     // float scale = 1./sqrt(size*size*c);
     float scale = sqrt(2./(size*size*c/groups));
+    // 初始化权重  rand_uniform从均匀分布中随机取值，范围为[minval,maxval)
     for(i = 0; i < l.nweights; ++i) l.weights[i] = scale*rand_uniform(-1, 1);   // rand_normal();
+    //根据卷积核 以及输入大小 计算输出大小
     int out_h = convolutional_out_height(l);
     int out_w = convolutional_out_width(l);
     l.out_h = out_h;
@@ -630,6 +636,12 @@ convolutional_layer make_convolutional_layer(int batch, int steps, int h, int w,
     l.workspace_size = get_convolutional_workspace_size(l);
 
     //fprintf(stderr, "conv  %5d %2d x%2d /%2d  %4d x%4d x%4d   ->  %4d x%4d x%4d\n", n, size, size, stride, w, h, c, l.out_w, l.out_h, l.out_c);
+    /*
+     * 下面是计算bfops  表示该卷积层计算 需要的多少个十亿次浮点运算
+     * 2.0表示一次乘法一次加法，将1次乘加看成两次运算(一次乘法, 一次加法),
+     *    根据矩阵乘法规则得来的（计算规则是，第一个矩阵第一行的每个数字（2和1），各自乘以第二个矩阵第一列对应位置的数字（1和1））
+     * 
+     */
     l.bflops = (2.0 * l.nweights * l.out_h*l.out_w) / 1000000000.;
     if (l.xnor) l.bflops = l.bflops / 32;
     if (l.xnor && l.use_bin_output) fprintf(stderr, "convXB");

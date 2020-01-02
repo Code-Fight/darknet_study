@@ -102,11 +102,18 @@ void free_list_contents_kvp(list *l)
     }
 }
 
+/*
+将链表 转为 数组
+*/
 void **list_to_array(list *l)
 {
+    //void * 是一种特别的指针 
+    //void* 可以是一个一级指针,二级指针,甚至是n级指针
+    //但我们的使用习惯是, 一个 * 代表一级指针,多级指针就用n个*表示.  
     void** a = (void**)calloc(l->size, sizeof(void*));
     int count = 0;
     node *n = l->front;
+    //循环取整个链表的数据
     while(n){
         a[count++] = n->val;
         n = n->next;

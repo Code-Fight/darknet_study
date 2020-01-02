@@ -1163,7 +1163,9 @@ void pull_convolutional_layer(convolutional_layer l)
 
 void push_convolutional_layer(convolutional_layer l)
 {
+    //同步内存和显存的数据
     cuda_push_array(l.weights_gpu, l.weights, l.nweights);
+    //CUDNN_HALF这个可以加速推理和训练 但是需要新显卡 必须得支持tensor core的才可以
 #ifdef CUDNN_HALF
     assert(l.nweights > 0);
     cuda_convert_f32_to_f16(l.weights_gpu, l.nweights, l.weights_gpu16);

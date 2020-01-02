@@ -96,7 +96,9 @@ extern "C" {
 //    cv::Mat ipl_to_mat(IplImage *ipl);
 //    IplImage *mat_to_ipl(cv::Mat mat);
 
-
+/*
+    加载图片到mat_cv
+*/
 extern "C" mat_cv *load_image_mat_cv(const char *filename, int flag)
 {
     cv::Mat *mat_ptr = NULL;
@@ -116,10 +118,11 @@ extern "C" mat_cv *load_image_mat_cv(const char *filename, int flag)
             return NULL;
         }
         cv::Mat dst;
+        //这里处理一下通道 以及色彩空间转换一下
         if (mat.channels() == 3) cv::cvtColor(mat, dst, cv::COLOR_RGB2BGR);
         else if (mat.channels() == 4) cv::cvtColor(mat, dst, cv::COLOR_RGBA2BGRA);
         else dst = mat;
-
+        //最后重新创建一个新的Mat 并在后面转mat_cv
         mat_ptr = new cv::Mat(dst);
 
         return (mat_cv *)mat_ptr;
@@ -324,12 +327,17 @@ extern "C" cv::Mat image_to_mat(image img)
 }
 // ----------------------------------------
 
+/*
+ * 将一个Mat转为自定义image对象
+ */
 extern "C" image mat_to_image(cv::Mat mat)
 {
     int w = mat.cols;
     int h = mat.rows;
     int c = mat.channels();
     image im = make_image(w, h, c);
+	// cv::imshow("test", mat);
+	//cv::imwrite("test-out.jpg", mat);
     unsigned char *data = (unsigned char *)mat.data;
     int step = mat.step;
     for (int y = 0; y < h; ++y) {
@@ -1135,6 +1143,9 @@ extern "C" void draw_train_loss(mat_cv* img_src, int img_size, float avg_loss, f
 // Data augmentation
 // ====================================================================
 
+/*
+ * 数据增强
+ */
 extern "C" image image_data_augmentation(mat_cv* mat, int w, int h,
     int pleft, int ptop, int swidth, int sheight, int flip,
     float dhue, float dsat, float dexp,

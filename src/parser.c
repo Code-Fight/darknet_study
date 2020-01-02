@@ -47,6 +47,7 @@ typedef struct{
 
 list *read_cfg(char *filename);
 
+//根据配置当前节点的字符串 返回枚举
 LAYER_TYPE string_to_layer_type(char * type)
 {
 
@@ -162,6 +163,7 @@ convolutional_layer parse_convolutional(list *options, size_params params)
     int size = option_find_int(options, "size",1);
     int stride = -1;
     //int stride = option_find_int(options, "stride",1);
+    //TODO:这里不懂为什么要把步长分开
     int stride_x = option_find_int_quiet(options, "stride_x", -1);
     int stride_y = option_find_int_quiet(options, "stride_y", -1);
     if (stride_x < 1 || stride_y < 1) {
@@ -175,15 +177,17 @@ convolutional_layer parse_convolutional(list *options, size_params params)
     int dilation = option_find_int_quiet(options, "dilation", 1);
     int antialiasing = option_find_int_quiet(options, "antialiasing", 0);
     if (size == 1) dilation = 1;
+    //pad和padding  3*3的卷积 加padding 步长为1保证feature map大小不变
     int pad = option_find_int_quiet(options, "pad",0);
     int padding = option_find_int_quiet(options, "padding",0);
+    //padding计算方式 向下取整
     if(pad) padding = size/2;
 
     char *activation_s = option_find_str(options, "activation", "logistic");
     ACTIVATION activation = get_activation(activation_s);
-
+    //TODO:辅助激活函数？？
     int assisted_excitation = option_find_float_quiet(options, "assisted_excitation", 0);
-
+    //TODO:参数共享层吗？？
     int share_index = option_find_int_quiet(options, "share_index", -1000000000);
     convolutional_layer *share_layer = NULL;
     if(share_index >= 0) share_layer = &params.net.layers[share_index];
@@ -200,6 +204,9 @@ convolutional_layer parse_convolutional(list *options, size_params params)
     int xnor = option_find_int_quiet(options, "xnor", 0);
     int use_bin_output = option_find_int_quiet(options, "bin_output", 0);
 
+    //格式化conv网络
+    //同时定义conv的前向和后向计算
+    //这里面有很多参数 需要去理解
     convolutional_layer layer = make_convolutional_layer(batch,1,h,w,c,n,groups,size,stride_x,stride_y,dilation,padding,activation, batch_normalize, binary, xnor, params.net.adam, use_bin_output, params.index, antialiasing, share_layer, assisted_excitation, params.train);
     layer.flipped = option_find_int_quiet(options, "flipped", 0);
     layer.dot = option_find_float_quiet(options, "dot", 0);
@@ -327,6 +334,9 @@ softmax_layer parse_softmax(list *options, size_params params)
 	return layer;
 }
 
+/*
+    格式化yolo层的anchor对应的mask
+*/
 int *parse_yolo_mask(char *a, int *num)
 {
     int *mask = 0;
@@ -341,6 +351,7 @@ int *parse_yolo_mask(char *a, int *num)
         for (i = 0; i < n; ++i) {
             int val = atoi(a);
             mask[i] = val;
+            //strchr 返回的是a这个字符串中第一次出现的这个字符的【指针】，所以+1就到下一个字符了
             a = strchr(a, ',') + 1;
         }
         *num = n;
@@ -351,9 +362,10 @@ int *parse_yolo_mask(char *a, int *num)
 layer parse_yolo(list *options, size_params params)
 {
     int classes = option_find_int(options, "classes", 20);
+    //anchor的数量
     int total = option_find_int(options, "num", 1);
     int num = total;
-
+    //使用哪几个anchor的索引
     char *a = option_find_str(options, "mask", 0);
     int *mask = parse_yolo_mask(a, &num);
     int max_boxes = option_find_int_quiet(options, "max", 90);
@@ -731,14 +743,17 @@ layer parse_shortcut(list *options, size_params params, network net)
     ACTIVATION activation = get_activation(activation_s);
 
     int assisted_excitation = option_find_float_quiet(options, "assisted_excitation", 0);
+    //取跟哪层拼接
     char *l = option_find(options, "from");
     int index = atoi(l);
     if(index < 0) index = params.index + index;
 
     int batch = params.batch;
+    //取到要拼接的那一层
     layer from = net.layers[index];
     if (from.antialiasing) from = *from.input_layer;
 
+    //构造shortcut层
     layer s = make_shortcut_layer(batch, index, params.w, params.h, params.c, from.out_w, from.out_h, from.out_c, assisted_excitation, activation, params.train);
 
     return s;
@@ -804,6 +819,9 @@ layer parse_activation(list *options, size_params params)
     return l;
 }
 
+/*
+ * 上采样层，把小feature map 变大的手段
+ */
 layer parse_upsample(list *options, size_params params, network net)
 {
 
@@ -820,12 +838,15 @@ route_layer parse_route(list *options, size_params params)
     if(!l) error("Route Layer must specify input layers");
     int n = 1;
     int i;
+
+    // 这个n 从1  开始，表示的是有多少个元素，至少1个层进行拼接，然后 没找一个“，”表示后面肯定有一个层，所以++n
     for(i = 0; i < len; ++i){
         if (l[i] == ',') ++n;
     }
-
+    //创建层索引和大小的两个数组  
     int* layers = (int*)calloc(n, sizeof(int));
     int* sizes = (int*)calloc(n, sizeof(int));
+    //然后把层索引和大小都取出来
     for(i = 0; i < n; ++i){
         int index = atoi(l);
         l = strchr(l, ',')+1;
@@ -837,7 +858,7 @@ route_layer parse_route(list *options, size_params params)
 
     int groups = option_find_int_quiet(options, "groups", 1);
     int group_id = option_find_int_quiet(options, "group_id", 0);
-
+    //处理router layer  把之前的层和大小都传过去
     route_layer layer = make_route_layer(batch, n, layers, sizes, groups, group_id);
 
     convolutional_layer first = params.net.layers[layers[0]];
@@ -1034,6 +1055,16 @@ network parse_network_cfg_custom(char *filename, int batch, int time_steps)
     parse_net_options(options, &net);
 
 #ifdef GPU
+    //这是一个测试 https://github.com/AlexeyAB/darknet/issues/4386
+    //Higher mini_batch -> higher accuracy mAP/Top1/Top5.
+	//测试平台
+    //GeForce RTX 2070 - 8 GB VRAM
+	//CPU Core i7 6700K - 32 GB RAM
+    // default: mini_batch = 8 = batch_64 / subdivisions_8, GPU - RAM - usage = 6.5 GB, iteration = 3 sec
+	// optimized_memory = 1 : mini_batch = 8 = batch_64 / subdivisions_8, GPU - RAM - usage = 5.8 GB, iteration = 3 sec
+  	// optimized_memory = 2 workspace_size_limit_MB = 1000 : mini_batch = 20 = batch_60 / subdivisions_3, GPU - RAM - usage = 5.4 GB, iteration = 15 sec
+  	// optimized_memory = 3 workspace_size_limit_MB = 1000 : mini_batch = 32 = batch_64 / subdivisions_2, GPU - RAM - usage = 4.0 GB, iteration = 15 sec(CPU - RAM - usage = 31 GB)
+     
     printf("net.optimized_memory = %d \n", net.optimized_memory);
     if (net.optimized_memory >= 2 && params.train) {
         pre_allocate_pinned_memory((size_t)1024 * 1024 * 1024 * 8);   // pre-allocate 8 GB CPU-RAM for pinned memory
@@ -1062,12 +1093,14 @@ network parse_network_cfg_custom(char *filename, int batch, int time_steps)
     int count = 0;
     free_section(s);
     fprintf(stderr, "   layer   filters  size/strd(dil)      input                output\n");
+    //打印并格式化所有的节点
     while(n){
         params.index = count;
         fprintf(stderr, "%4d ", count);
         s = (section *)n->val;
         options = s->options;
         layer l = { (LAYER_TYPE)0 };
+        //根据配置文件的字符串 转换为 层的枚举
         LAYER_TYPE lt = string_to_layer_type(s->type);
         if(lt == CONVOLUTIONAL){
             l = parse_convolutional(options, params);
@@ -1172,12 +1205,15 @@ network parse_network_cfg_custom(char *filename, int batch, int time_steps)
 
 #ifdef GPU
         // futher GPU-memory optimization: net.optimized_memory == 2
+        // 参考上面的说明 通过提升mini-batch 来提升 ap ，通过内存来替代显存的不够
         if (net.optimized_memory >= 2 && params.train && l.type != DROPOUT)
         {
             l.optimized_memory = net.optimized_memory;
             if (l.output_gpu) {
+                //释放掉原来的显存
                 cuda_free(l.output_gpu);
                 //l.output_gpu = cuda_make_array_pinned(l.output, l.batch*l.outputs); // l.steps
+                //TODO:重新分配显存，这里的细节需要去了解，应该是拆分内存 分批进去到显卡去计算
                 l.output_gpu = cuda_make_array_pinned_preallocated(NULL, l.batch*l.outputs); // l.steps
             }
             if (l.activation_input_gpu) {
@@ -1207,11 +1243,14 @@ network parse_network_cfg_custom(char *filename, int batch, int time_steps)
 
         l.onlyforward = option_find_int_quiet(options, "onlyforward", 0);
         l.stopbackward = option_find_int_quiet(options, "stopbackward", 0);
+        //指示该层是否加载权重
         l.dontload = option_find_int_quiet(options, "dontload", 0);
         l.dontloadscales = option_find_int_quiet(options, "dontloadscales", 0);
         l.learning_rate_scale = option_find_float_quiet(options, "learning_rate", 1);
         option_unused(options);
         net.layers[count] = l;
+		//其中workspace代表网络的工作空间，指的是所有层中占用运算空间最大那个层的workspace。因为在CPU或GPU中某个时刻只有一个层在做前向或反向传播
+		//所以工作空间的大小必须为最大的层的大小 
         if (l.workspace_size > workspace_size) workspace_size = l.workspace_size;
         if (l.inputs > max_inputs) max_inputs = l.inputs;
         if (l.outputs > max_outputs) max_outputs = l.outputs;
@@ -1605,6 +1644,9 @@ void load_convolutional_weights_binary(layer l, FILE *fp)
 #endif
 }
 
+/*
+ * 加载卷积网络的权重，到相应的网络层中。
+ */
 void load_convolutional_weights(layer l, FILE *fp)
 {
     if(l.binary){
@@ -1613,14 +1655,22 @@ void load_convolutional_weights(layer l, FILE *fp)
     }
     int num = l.nweights;
     int read_bytes;
+    //首先读取偏置biases，根据有多少个kernel来确定 一个kernel 一个biases
+    //卷积层的权重存储是先保存的biases
     read_bytes = fread(l.biases, sizeof(float), l.n, fp);
+    //判断读出来的biases和预期的数量是否一致 不一致说明权重文件不对
     if (read_bytes > 0 && read_bytes < l.n) printf("\n Warning: Unexpected end of wights-file! l.biases - l.index = %d \n", l.index);
     //fread(l.weights, sizeof(float), num, fp); // as in connected layer
+
+    //处理batch_normalize
     if (l.batch_normalize && (!l.dontloadscales)){
+        //l.scales
         read_bytes = fread(l.scales, sizeof(float), l.n, fp);
         if (read_bytes > 0 && read_bytes < l.n) printf("\n Warning: Unexpected end of wights-file! l.scales - l.index = %d \n", l.index);
+        //滚动均值 l.rolling_mean
         read_bytes = fread(l.rolling_mean, sizeof(float), l.n, fp);
         if (read_bytes > 0 && read_bytes < l.n) printf("\n Warning: Unexpected end of wights-file! l.rolling_mean - l.index = %d \n", l.index);
+        //滚动方差 l.rolling_variance
         read_bytes = fread(l.rolling_variance, sizeof(float), l.n, fp);
         if (read_bytes > 0 && read_bytes < l.n) printf("\n Warning: Unexpected end of wights-file! l.rolling_variance - l.index = %d \n", l.index);
         if(0){
@@ -1639,6 +1689,7 @@ void load_convolutional_weights(layer l, FILE *fp)
             fill_cpu(l.n, 0, l.rolling_variance, 1);
         }
     }
+    //处理weights   kernel 的处理weights
     read_bytes = fread(l.weights, sizeof(float), num, fp);
     if (read_bytes > 0 && read_bytes < l.n) printf("\n Warning: Unexpected end of wights-file! l.weights - l.index = %d \n", l.index);
     //if(l.adam){
@@ -1646,6 +1697,7 @@ void load_convolutional_weights(layer l, FILE *fp)
     //    fread(l.v, sizeof(float), num, fp);
     //}
     //if(l.c == 3) scal_cpu(num, 1./256, l.weights, 1);
+    //TODO:反转？反转矩阵 不知道干啥的
     if (l.flipped) {
         transpose_matrix(l.weights, (l.c/l.groups)*l.size*l.size, l.n);
     }
@@ -1657,7 +1709,9 @@ void load_convolutional_weights(layer l, FILE *fp)
 #endif
 }
 
-
+/*
+* 加载权重信息到网络中
+*/
 void load_weights_upto(network *net, char *filename, int cutoff)
 {
 #ifdef GPU
@@ -1691,9 +1745,11 @@ void load_weights_upto(network *net, char *filename, int cutoff)
     int transpose = (major > 1000) || (minor > 1000);
 
     int i;
+    //遍历整个网络，并加载权重到每一层，这里有很多层是没有权重的
     for(i = 0; i < net->n && i < cutoff; ++i){
         layer l = net->layers[i];
         if (l.dontload) continue;
+        //加载卷积网络的权重
         if(l.type == CONVOLUTIONAL && l.share_layer == NULL){
             load_convolutional_weights(l, fp);
         }
@@ -1757,12 +1813,16 @@ void load_weights_upto(network *net, char *filename, int cutoff)
             }
 #endif
         }
-        if (feof(fp)) break;
+        if (feof(fp)) 
+            break;
     }
     fprintf(stderr, "Done! Loaded %d layers from weights-file \n", i);
     fclose(fp);
 }
 
+/*
+ * 加载权重信息到网络中
+ */
 void load_weights(network *net, char *filename)
 {
     load_weights_upto(net, filename, net->n);

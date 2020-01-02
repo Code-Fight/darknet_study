@@ -193,6 +193,9 @@ void find_replace(const char* str, char* orig, char* rep, char* output)
     free(buffer);
 }
 
+/*
+    手动实现trim 字符串
+*/
 void trim(char *str)
 {
     char* buffer = (char*)calloc(8192, sizeof(char));
@@ -229,9 +232,12 @@ void find_replace_extension(char *str, char *orig, char *rep, char *output)
     sprintf(output, "%s%s%s", buffer, rep, p + strlen(orig));
     free(buffer);
 }
-
+/*
+    替换图片路径为标注路径
+*/
 void replace_image_to_label(const char* input_path, char* output_path)
 {
+    //自动处理公开数据
     find_replace(input_path, "/images/train2014/", "/labels/train2014/", output_path);    // COCO
     find_replace(output_path, "/images/val2014/", "/labels/val2014/", output_path);        // COCO
     find_replace(output_path, "/JPEGImages/", "/labels/", output_path);    // PascalVOC
@@ -374,9 +380,12 @@ void free_ptrs(void **ptrs, int n)
 
 char *fgetl(FILE *fp)
 {
+    //feof?ж????????β
     if(feof(fp)) return 0;
     size_t size = 512;
     char* line = (char*)malloc(size * sizeof(char));
+    //fgets?????ж????У????size??????????????з?
+    //??????  ????????? ?????0
     if(!fgets(line, size, fp)){
         free(line);
         return 0;
@@ -384,10 +393,14 @@ char *fgetl(FILE *fp)
 
     size_t curr = strlen(line);
 
+    //????????? ??????л??з?????????????????β??
+    //???????????з? ???? ????????? ???????????
     while((line[curr-1] != '\n') && !feof(fp)){
+        // ??????ж???????????? ?????·???
         if(curr == size-1){
             size *= 2;
             line = (char*)realloc(line, size * sizeof(char));
+            //???????????
             if(!line) {
                 printf("%ld\n", size);
                 malloc_error();
@@ -398,9 +411,10 @@ char *fgetl(FILE *fp)
         fgets(&line[curr], readsize, fp);
         curr = strlen(line);
     }
+    //0x0d  ???
     if(curr >= 2)
         if(line[curr-2] == 0x0d) line[curr-2] = 0x00;
-
+    //0x0a  ????
     if(curr >= 1)
         if(line[curr-1] == 0x0a) line[curr-1] = 0x00;
 
@@ -813,6 +827,9 @@ float **one_hot_encode(float *a, int n, int k)
     return t;
 }
 
+/*
+    随机数生成
+*/
 unsigned int random_gen()
 {
     unsigned int rnd = 0;
@@ -827,6 +844,9 @@ unsigned int random_gen()
     return rnd;
 }
 
+/*
+    随机生成在浮点数
+*/
 float random_float()
 {
 #ifdef WIN32
@@ -836,6 +856,9 @@ float random_float()
 #endif
 }
 
+/*
+    随机生成在某个范围内的随机数
+*/
 float rand_uniform_strong(float min, float max)
 {
     if (max < min) {

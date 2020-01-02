@@ -79,6 +79,9 @@ void option_insert(list *l, char *key, char *val)
     list_insert(l, p);
 }
 
+/*
+ * 打印所有没有呗标记为used的节点key和val
+ */
 void option_unused(list *l)
 {
     node *n = l->front;

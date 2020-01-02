@@ -16,6 +16,7 @@ route_layer make_route_layer(int batch, int n, int *input_layers, int *input_siz
     l.group_id = group_id;
     int i;
     int outputs = 0;
+    //router的输出  就是所有层的输入的size的和
     for(i = 0; i < n; ++i){
         fprintf(stderr," %d", input_layers[i]);
         outputs += input_sizes[i];

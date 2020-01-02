@@ -24,7 +24,10 @@ static int coco_ids[] = { 1,2,3,4,5,6,7,8,9,10,11,13,14,15,16,17,18,19,20,21,22,
 
 void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, int ngpus, int clear, int dont_show, int calc_map, int mjpeg_port, int show_imgs)
 {
+    //options 读取data.obj 这个文件，并将内容处理为list
     list *options = read_data_cfg(datacfg);
+    //option_find_str 从 options 中读取相应的配置文件，
+    //TODO： list的是有node构造的 为什么能转换为kvp
     char *train_images = option_find_str(options, "train", "data/train.txt");
     char *valid_images = option_find_str(options, "valid", train_images);
     char *backup_directory = option_find_str(options, "backup", "/backup/");
@@ -38,7 +41,7 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
             exit(-1);
         }
         else fclose(valid_file);
-
+        
         cuda_set_device(gpus[0]);
         printf(" Prepare additional network for mAP calculation...\n");
         net_map = parse_network_cfg_custom(cfgfile, 1, 1);
@@ -59,6 +62,7 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
     }
 
     srand(time(0));
+    //将cfg路径处理为cfg不带后缀的文件名 
     char *base = basecfg(cfgfile);
     printf("%s\n", base);
     float avg_loss = -1;
@@ -68,15 +72,20 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
     int seed = rand();
     int i;
     for (i = 0; i < ngpus; ++i) {
+        //设置随机数种子 配合rand使用
         srand(seed);
+        //设置使用哪个GPU
 #ifdef GPU
         cuda_set_device(gpus[i]);
 #endif
+        //格式化网络到nets对象中
         nets[i] = parse_network_cfg(cfgfile);
+        //加载权重文件到网络中
         if (weightfile) {
             load_weights(&nets[i], weightfile);
         }
         if (clear) *nets[i].seen = 0;
+        //多显卡训练 learning_rate 需要相应的缩小
         nets[i].learning_rate *= ngpus;
     }
     srand(time(0));
@@ -95,18 +104,25 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
     printf("Learning Rate: %g, Momentum: %g, Decay: %g\n", net.learning_rate, net.momentum, net.decay);
     data train, buffer;
 
+    //取最后一层
     layer l = net.layers[net.n - 1];
 
+    //类别数量
     int classes = l.classes;
+    //利用数据抖动产生更多数据，YOLOv2中使用的是crop，filp，以及net层的angle，flip是随机的，
+	//jitter就是crop的参数，tiny-yolo-voc.cfg中jitter=.3，就是在0~0.3中进行crop
     float jitter = l.jitter;
 
+    //通过train.txt文本获取所有的文件
     list *plist = get_paths(train_images);
     int train_images_num = plist->size;
+    //链表转数据
     char **paths = (char **)list_to_array(plist);
 
     int init_w = net.w;
     int init_h = net.h;
     int iter_save, iter_save_last, iter_map;
+    //这里的三个参数 需要从网络中来，是因为可能会retrain
     iter_save = get_current_batch(net);
     iter_save_last = get_current_batch(net);
     iter_map = get_current_batch(net);
@@ -118,7 +134,9 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
     args.h = net.h;
     args.c = net.c;
     args.paths = paths;
+    //每个批次的数量
     args.n = imgs;
+    //总训练样本数量
     args.m = plist->size;
     args.classes = classes;
     args.flip = net.flip;
@@ -129,7 +147,7 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
     args.d = &buffer;
     args.type = DETECTION_DATA;
     args.threads = 64;    // 16 or 64
-
+    //训练样本图像增强参数
     args.angle = net.angle;
     args.blur = net.blur;
     args.mixup = net.mixup;
@@ -149,7 +167,7 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
     int img_size = 1000;
     img = draw_train_chart(max_img_loss, net.max_batches, number_of_lines, img_size, dont_show);
 #endif    //OPENCV
-    if (net.track) {
+    if (net.track) { 
         args.track = net.track;
         args.augment_speed = net.augment_speed;
         if (net.sequential_subdivisions) args.threads = net.sequential_subdivisions * ngpus;
@@ -158,7 +176,7 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
         printf("\n Tracking! batch = %d, subdiv = %d, time_steps = %d, mini_batch = %d \n", net.batch, net.subdivisions, net.time_steps, args.mini_batch);
     }
     //printf(" imgs = %d \n", imgs);
-
+    //加载图片
     pthread_t load_thread = load_data(args);
     double time;
     int count = 0;
