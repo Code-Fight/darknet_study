@@ -22,12 +22,9 @@ int check_mistakes = 0;
 
 static int coco_ids[] = { 1,2,3,4,5,6,7,8,9,10,11,13,14,15,16,17,18,19,20,21,22,23,24,25,27,28,31,32,33,34,35,36,37,38,39,40,41,42,43,44,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,67,70,72,73,74,75,76,77,78,79,80,81,82,84,85,86,87,88,89,90 };
 
-void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, int ngpus, int clear, int dont_show, int calc_map, int mjpeg_port, int show_imgs)
+void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, int ngpus, int clear, int dont_show, int calc_map, int mjpeg_port, int show_imgs, int benchmark_layers)
 {
-    //options 读取data.obj 这个文件，并将内容处理为list
     list *options = read_data_cfg(datacfg);
-    //option_find_str 从 options 中读取相应的配置文件，
-    //TODO： list的是有node构造的 为什么能转换为kvp
     char *train_images = option_find_str(options, "train", "data/train.txt");
     char *valid_images = option_find_str(options, "valid", train_images);
     char *backup_directory = option_find_str(options, "backup", "/backup/");
@@ -41,14 +38,14 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
             exit(-1);
         }
         else fclose(valid_file);
-        
+
         cuda_set_device(gpus[0]);
         printf(" Prepare additional network for mAP calculation...\n");
         net_map = parse_network_cfg_custom(cfgfile, 1, 1);
         const int net_classes = net_map.layers[net_map.n - 1].classes;
 
         int k;  // free memory unnecessary arrays
-        for (k = 0; k < net_map.n - 1; ++k) free_layer(net_map.layers[k]);
+        for (k = 0; k < net_map.n - 1; ++k) free_layer_custom(net_map.layers[k], 1);
 
         char *name_list = option_find_str(options, "names", "data/names.list");
         int names_size = 0;
@@ -62,7 +59,6 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
     }
 
     srand(time(0));
-    //将cfg路径处理为cfg不带后缀的文件名 
     char *base = basecfg(cfgfile);
     printf("%s\n", base);
     float avg_loss = -1;
@@ -72,20 +68,16 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
     int seed = rand();
     int i;
     for (i = 0; i < ngpus; ++i) {
-        //设置随机数种子 配合rand使用
         srand(seed);
-        //设置使用哪个GPU
 #ifdef GPU
         cuda_set_device(gpus[i]);
 #endif
-        //格式化网络到nets对象中
         nets[i] = parse_network_cfg(cfgfile);
-        //加载权重文件到网络中
+        nets[i].benchmark_layers = benchmark_layers;
         if (weightfile) {
             load_weights(&nets[i], weightfile);
         }
         if (clear) *nets[i].seen = 0;
-        //多显卡训练 learning_rate 需要相应的缩小
         nets[i].learning_rate *= ngpus;
     }
     srand(time(0));
@@ -104,25 +96,18 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
     printf("Learning Rate: %g, Momentum: %g, Decay: %g\n", net.learning_rate, net.momentum, net.decay);
     data train, buffer;
 
-    //取最后一层
     layer l = net.layers[net.n - 1];
 
-    //类别数量
     int classes = l.classes;
-    //利用数据抖动产生更多数据，YOLOv2中使用的是crop，filp，以及net层的angle，flip是随机的，
-	//jitter就是crop的参数，tiny-yolo-voc.cfg中jitter=.3，就是在0~0.3中进行crop
     float jitter = l.jitter;
 
-    //通过train.txt文本获取所有的文件
     list *plist = get_paths(train_images);
     int train_images_num = plist->size;
-    //链表转数据
     char **paths = (char **)list_to_array(plist);
 
     int init_w = net.w;
     int init_h = net.h;
     int iter_save, iter_save_last, iter_map;
-    //这里的三个参数 需要从网络中来，是因为可能会retrain
     iter_save = get_current_batch(net);
     iter_save_last = get_current_batch(net);
     iter_map = get_current_batch(net);
@@ -134,9 +119,7 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
     args.h = net.h;
     args.c = net.c;
     args.paths = paths;
-    //每个批次的数量
     args.n = imgs;
-    //总训练样本数量
     args.m = plist->size;
     args.classes = classes;
     args.flip = net.flip;
@@ -147,7 +130,7 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
     args.d = &buffer;
     args.type = DETECTION_DATA;
     args.threads = 64;    // 16 or 64
-    //训练样本图像增强参数
+
     args.angle = net.angle;
     args.blur = net.blur;
     args.mixup = net.mixup;
@@ -162,12 +145,14 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
     args.threads = 6 * ngpus;   // 3 for - Amazon EC2 Tesla V100: p3.2xlarge (8 logical cores) - p3.16xlarge
     //args.threads = 12 * ngpus;    // Ryzen 7 2700X (16 logical cores)
     mat_cv* img = NULL;
-    float max_img_loss = 20;
+    float max_img_loss = 5;
     int number_of_lines = 100;
     int img_size = 1000;
-    img = draw_train_chart(max_img_loss, net.max_batches, number_of_lines, img_size, dont_show);
+    char windows_name[100];
+    sprintf(windows_name, "chart_%s.png", base);
+    img = draw_train_chart(windows_name, max_img_loss, net.max_batches, number_of_lines, img_size, dont_show);
 #endif    //OPENCV
-    if (net.track) { 
+    if (net.track) {
         args.track = net.track;
         args.augment_speed = net.augment_speed;
         if (net.sequential_subdivisions) args.threads = net.sequential_subdivisions * ngpus;
@@ -176,7 +161,7 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
         printf("\n Tracking! batch = %d, subdiv = %d, time_steps = %d, mini_batch = %d \n", net.batch, net.subdivisions, net.time_steps, args.mini_batch);
     }
     //printf(" imgs = %d \n", imgs);
-    //加载图片
+
     pthread_t load_thread = load_data(args);
     double time;
     int count = 0;
@@ -310,7 +295,7 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
             draw_precision = 1;
         }
 #ifdef OPENCV
-        draw_train_loss(img, img_size, avg_loss, max_img_loss, i, net.max_batches, mean_average_precision, draw_precision, "mAP%", dont_show, mjpeg_port);
+        draw_train_loss(windows_name, img, img_size, avg_loss, max_img_loss, i, net.max_batches, mean_average_precision, draw_precision, "mAP%", dont_show, mjpeg_port);
 #endif    // OPENCV
 
         //if (i % 1000 == 0 || (i < 1000 && i % 100 == 0)) {
@@ -1448,7 +1433,7 @@ void calc_anchors(char *datacfg, int num_of_clusters, int width, int height, int
 
 
 void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filename, float thresh,
-    float hier_thresh, int dont_show, int ext_output, int save_labels, char *outfile, int letter_box)
+    float hier_thresh, int dont_show, int ext_output, int save_labels, char *outfile, int letter_box, int benchmark_layers)
 {
     list *options = read_data_cfg(datacfg);
     char *name_list = option_find_str(options, "names", "data/names.list");
@@ -1460,6 +1445,7 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
     if (weightfile) {
         load_weights(&net, weightfile);
     }
+    net.benchmark_layers = benchmark_layers;
     fuse_conv_batchnorm(net);
     calculate_binary_weights(net);
     if (net.layers[net.n - 1].classes != names_size) {
@@ -1603,6 +1589,7 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
 void run_detector(int argc, char **argv)
 {
     int dont_show = find_arg(argc, argv, "-dont_show");
+    int benchmark_layers = find_arg(argc, argv, "-benchmark_layers");
     int show = find_arg(argc, argv, "-show");
     int letter_box = find_arg(argc, argv, "-letter_box");
     int calc_map = find_arg(argc, argv, "-map");
@@ -1665,8 +1652,8 @@ void run_detector(int argc, char **argv)
         if (strlen(weights) > 0)
             if (weights[strlen(weights) - 1] == 0x0d) weights[strlen(weights) - 1] = 0;
     char *filename = (argc > 6) ? argv[6] : 0;
-    if (0 == strcmp(argv[2], "test")) test_detector(datacfg, cfg, weights, filename, thresh, hier_thresh, dont_show, ext_output, save_labels, outfile, letter_box);
-    else if (0 == strcmp(argv[2], "train")) train_detector(datacfg, cfg, weights, gpus, ngpus, clear, dont_show, calc_map, mjpeg_port, show_imgs);
+    if (0 == strcmp(argv[2], "test")) test_detector(datacfg, cfg, weights, filename, thresh, hier_thresh, dont_show, ext_output, save_labels, outfile, letter_box, benchmark_layers);
+    else if (0 == strcmp(argv[2], "train")) train_detector(datacfg, cfg, weights, gpus, ngpus, clear, dont_show, calc_map, mjpeg_port, show_imgs, benchmark_layers);
     else if (0 == strcmp(argv[2], "valid")) validate_detector(datacfg, cfg, weights, outfile);
     else if (0 == strcmp(argv[2], "recall")) validate_detector_recall(datacfg, cfg, weights);
     else if (0 == strcmp(argv[2], "map")) validate_detector_map(datacfg, cfg, weights, thresh, iou_thresh, map_points, letter_box, NULL);

@@ -151,7 +151,7 @@ matrix load_image_paths(char **paths, int n, int w, int h)
     return X;
 }
 
-matrix load_image_augment_paths(char **paths, int n, int use_flip, int min, int max, int w, int h, float angle, float aspect, float hue, float saturation, float exposure)
+matrix load_image_augment_paths(char **paths, int n, int use_flip, int min, int max, int w, int h, float angle, float aspect, float hue, float saturation, float exposure, int dontuse_opencv)
 {
     int i;
     matrix X;
@@ -161,7 +161,10 @@ matrix load_image_augment_paths(char **paths, int n, int use_flip, int min, int 
 
     for(i = 0; i < n; ++i){
         int size = w > h ? w : h;
-        image im = load_image_color(paths[i], 0, 0);
+        image im;
+        if(dontuse_opencv) im = load_image_stb_resize(paths[i], 0, 0, 3);
+        else im = load_image_color(paths[i], 0, 0);
+
         image crop = random_augment_image(im, angle, aspect, min, max, size);
         int flip = use_flip ? random_gen() % 2 : 0;
         if (flip)
@@ -408,7 +411,7 @@ int fill_truth_detection(const char *path, int num_boxes, float *truth, int clas
         // if truth (box for object) is smaller than 1x1 pix
         char buff[256];
         if (id >= classes) {
-            printf("\n Wrong annotation: class_id = %d. But class_id should be [from 0 to %d] \n", id, (classes-1));
+            printf("\n Wrong annotation: class_id = %d. But class_id should be [from 0 to %d], file: %s \n", id, (classes-1), labelpath);
             sprintf(buff, "echo %s \"Wrong annotation: class_id = %d. But class_id should be [from 0 to %d]\" >> bad_label.list", labelpath, id, (classes-1));
             system(buff);
             getchar();
@@ -425,7 +428,7 @@ int fill_truth_detection(const char *path, int num_boxes, float *truth, int clas
             continue;
         }
         if (x == 999999 || y == 999999) {
-            printf("\n Wrong annotation: x = 0, y = 0, < 0 or > 1 \n");
+            printf("\n Wrong annotation: x = 0, y = 0, < 0 or > 1, file: %s \n", labelpath);
             sprintf(buff, "echo %s \"Wrong annotation: x = 0 or y = 0\" >> bad_label.list", labelpath);
             system(buff);
             ++sub;
@@ -433,7 +436,7 @@ int fill_truth_detection(const char *path, int num_boxes, float *truth, int clas
             continue;
         }
         if (x <= 0 || x > 1 || y <= 0 || y > 1) {
-            printf("\n Wrong annotation: x = %f, y = %f \n", x, y);
+            printf("\n Wrong annotation: x = %f, y = %f, file: %s \n", x, y, labelpath);
             sprintf(buff, "echo %s \"Wrong annotation: x = %f, y = %f\" >> bad_label.list", labelpath, x, y);
             system(buff);
             ++sub;
@@ -441,14 +444,14 @@ int fill_truth_detection(const char *path, int num_boxes, float *truth, int clas
             continue;
         }
         if (w > 1) {
-            printf("\n Wrong annotation: w = %f \n", w);
+            printf("\n Wrong annotation: w = %f, file: %s \n", w, labelpath);
             sprintf(buff, "echo %s \"Wrong annotation: w = %f\" >> bad_label.list", labelpath, w);
             system(buff);
             w = 1;
             if (check_mistakes) getchar();
         }
         if (h > 1) {
-            printf("\n Wrong annotation: h = %f \n", h);
+            printf("\n Wrong annotation: h = %f, file: %s \n", h, labelpath);
             sprintf(buff, "echo %s \"Wrong annotation: h = %f\" >> bad_label.list", labelpath, h);
             system(buff);
             h = 1;
@@ -1438,7 +1441,7 @@ void *load_thread(void *ptr)
     if (a.type == OLD_CLASSIFICATION_DATA){
         *a.d = load_data_old(a.paths, a.n, a.m, a.labels, a.classes, a.w, a.h);
     } else if (a.type == CLASSIFICATION_DATA){
-        *a.d = load_data_augment(a.paths, a.n, a.m, a.labels, a.classes, a.hierarchy, a.flip, a.min, a.max, a.w, a.h, a.angle, a.aspect, a.hue, a.saturation, a.exposure, a.mixup, a.blur, a.show_imgs, a.label_smooth_eps);
+        *a.d = load_data_augment(a.paths, a.n, a.m, a.labels, a.classes, a.hierarchy, a.flip, a.min, a.max, a.w, a.h, a.angle, a.aspect, a.hue, a.saturation, a.exposure, a.mixup, a.blur, a.show_imgs, a.label_smooth_eps, a.dontuse_opencv);
     } else if (a.type == SUPER_DATA){
         *a.d = load_data_super(a.paths, a.n, a.m, a.w, a.h, a.scale);
     } else if (a.type == WRITING_DATA){
@@ -1586,20 +1589,20 @@ data load_data_super(char **paths, int n, int m, int w, int h, int scale)
     return d;
 }
 
-data load_data_augment(char **paths, int n, int m, char **labels, int k, tree *hierarchy, int use_flip, int min, int max, int w, int h, float angle, float aspect, float hue, float saturation, float exposure, int mixup, int use_blur, int show_imgs, float label_smooth_eps)
+data load_data_augment(char **paths, int n, int m, char **labels, int k, tree *hierarchy, int use_flip, int min, int max, int w, int h, float angle, float aspect, float hue, float saturation, float exposure, int use_mixup, int use_blur, int show_imgs, float label_smooth_eps, int dontuse_opencv)
 {
     char **paths_stored = paths;
     if(m) paths = get_random_paths(paths, n, m);
     data d = {0};
     d.shallow = 0;
-    d.X = load_image_augment_paths(paths, n, use_flip, min, max, w, h, angle, aspect, hue, saturation, exposure);
+    d.X = load_image_augment_paths(paths, n, use_flip, min, max, w, h, angle, aspect, hue, saturation, exposure, dontuse_opencv);
     d.y = load_labels_paths(paths, n, labels, k, hierarchy, label_smooth_eps);
 
-    if (mixup && rand_int(0, 1)) {
+    if (use_mixup && rand_int(0, 1)) {
         char **paths_mix = get_random_paths(paths_stored, n, m);
         data d2 = { 0 };
         d2.shallow = 0;
-        d2.X = load_image_augment_paths(paths_mix, n, use_flip, min, max, w, h, angle, aspect, hue, saturation, exposure);
+        d2.X = load_image_augment_paths(paths_mix, n, use_flip, min, max, w, h, angle, aspect, hue, saturation, exposure, dontuse_opencv);
         d2.y = load_labels_paths(paths_mix, n, labels, k, hierarchy, label_smooth_eps);
         free(paths_mix);
 
@@ -1607,14 +1610,14 @@ data load_data_augment(char **paths, int n, int m, char **labels, int k, tree *h
         d3.shallow = 0;
         data d4 = { 0 };
         d4.shallow = 0;
-        if (mixup >= 3) {
+        if (use_mixup >= 3) {
             char **paths_mix3 = get_random_paths(paths_stored, n, m);
-            d3.X = load_image_augment_paths(paths_mix3, n, use_flip, min, max, w, h, angle, aspect, hue, saturation, exposure);
+            d3.X = load_image_augment_paths(paths_mix3, n, use_flip, min, max, w, h, angle, aspect, hue, saturation, exposure, dontuse_opencv);
             d3.y = load_labels_paths(paths_mix3, n, labels, k, hierarchy, label_smooth_eps);
             free(paths_mix3);
 
             char **paths_mix4 = get_random_paths(paths_stored, n, m);
-            d4.X = load_image_augment_paths(paths_mix4, n, use_flip, min, max, w, h, angle, aspect, hue, saturation, exposure);
+            d4.X = load_image_augment_paths(paths_mix4, n, use_flip, min, max, w, h, angle, aspect, hue, saturation, exposure, dontuse_opencv);
             d4.y = load_labels_paths(paths_mix4, n, labels, k, hierarchy, label_smooth_eps);
             free(paths_mix4);
         }
@@ -1624,7 +1627,8 @@ data load_data_augment(char **paths, int n, int m, char **labels, int k, tree *h
         int i, j;
         for (i = 0; i < d2.X.rows; ++i) {
 
-            if (mixup == 4) mixup = rand_int(2, 3); // alternate MixUp and CutMix
+            int mixup = use_mixup;
+            if (use_mixup == 4) mixup = rand_int(2, 3); // alternate CutMix and Mosaic
 
             // MixUp -----------------------------------
             if (mixup == 1) {
@@ -1707,14 +1711,16 @@ data load_data_augment(char **paths, int n, int m, char **labels, int k, tree *h
                 }
 
                 for (j = 0; j < d.y.cols; ++j) {
-                    d.y.vals[i][j] = d.y.vals[i][j] * s1 + d2.y.vals[i][j] * s2 + d3.y.vals[i][j] * s3 + d4.y.vals[i][j] * s4;
+                    const float max_s = 1;// max_val_cmp(s1, max_val_cmp(s2, max_val_cmp(s3, s4)));
+
+                    d.y.vals[i][j] = d.y.vals[i][j] * s1 / max_s + d2.y.vals[i][j] * s2 / max_s + d3.y.vals[i][j] * s3 / max_s + d4.y.vals[i][j] * s4 / max_s;
                 }
             }
         }
 
         free_data(d2);
 
-        if (mixup == 3) {
+        if (use_mixup >= 3) {
             free_data(d3);
             free_data(d4);
         }
@@ -1782,7 +1788,7 @@ data load_data_tag(char **paths, int n, int m, int k, int use_flip, int min, int
     d.w = w;
     d.h = h;
     d.shallow = 0;
-    d.X = load_image_augment_paths(paths, n, use_flip, min, max, w, h, angle, aspect, hue, saturation, exposure);
+    d.X = load_image_augment_paths(paths, n, use_flip, min, max, w, h, angle, aspect, hue, saturation, exposure, 0);
     d.y = load_tags_paths(paths, n, k);
     if(m) free(paths);
     return d;
